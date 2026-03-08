@@ -2,7 +2,6 @@ import asyncio
 import logging
 import os
 import random
-from typing import Optional
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
@@ -82,42 +81,45 @@ class SearchState(StatesGroup):
 # --- KEYBOARDS ---
 def main_menu_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="🎬 Подобрать фильм", callback_data="mode_filter"))
+    builder.row(InlineKeyboardButton(text="🎲 Случайный топ-фильм", callback_data="mode_filter"))
     builder.row(
-        InlineKeyboardButton(text="🔥 Анти-скролл (1 топ фильм)", callback_data="mode_antiscroll"),
-        InlineKeyboardButton(text="⏱ На 90 минут", callback_data="mode_90mins")
+        InlineKeyboardButton(text="🔥 Анти-скролл", callback_data="mode_antiscroll"),
+        InlineKeyboardButton(text="⏱ До 90 минут", callback_data="mode_90mins")
     )
     builder.row(
         InlineKeyboardButton(text="🙈 Слепой выбор", callback_data="mode_blind"),
         InlineKeyboardButton(text="🎯 Похожее на...", callback_data="mode_similar")
     )
     builder.row(
-        InlineKeyboardButton(text="👥 Киновечер", callback_data="mode_party"),
+        InlineKeyboardButton(text="👥 Для компании", callback_data="mode_party"),
         InlineKeyboardButton(text="🧠 Не знаю что смотреть", callback_data="mode_idk")
     )
     builder.row(
-        InlineKeyboardButton(text="⭐ Избранное", callback_data="my_watchlist"),
+        InlineKeyboardButton(text="⭐️ Мое избранное", callback_data="my_watchlist"),
         InlineKeyboardButton(text="🎁 Пригласить друга", callback_data="invite_friend")
     )
     return builder.as_markup()
 
-def movie_card_kb(movie_id: int, is_blind: bool = False) -> InlineKeyboardMarkup:
+def movie_card_kb(movie_id: int, mode: str, is_blind: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     if is_blind:
-        builder.row(InlineKeyboardButton(text="👀 Открыть название и постер", callback_data=f"reveal_{movie_id}"))
+        builder.row(InlineKeyboardButton(text="👀 Открыть название и постер", callback_data=f"reveal_{movie_id}_{mode}"))
     else:
         builder.row(
-            InlineKeyboardButton(text="👍", callback_data=f"action_like_{movie_id}"),
-            InlineKeyboardButton(text="👎", callback_data=f"action_dislike_{movie_id}"),
-            InlineKeyboardButton(text="⭐ В избранное", callback_data=f"action_watchlist_{movie_id}")
+            InlineKeyboardButton(text="👍 Нравится", callback_data=f"action_like_{movie_id}"),
+            InlineKeyboardButton(text="👎 Не мое", callback_data=f"action_dislike_{movie_id}")
         )
         builder.row(
-            InlineKeyboardButton(text="✅ Уже смотрел", callback_data=f"action_seen_{movie_id}"),
-            InlineKeyboardButton(text="⏭ Еще вариант", callback_data="next_random")
+            InlineKeyboardButton(text="⭐️ В избранное", callback_data=f"action_watchlist_{movie_id}"),
+            InlineKeyboardButton(text="✅ Уже смотрел", callback_data=f"action_seen_{movie_id}")
         )
-        # Заглушка для трейлера (в реале нужно делать отдельный запрос к /videos)
-        builder.row(InlineKeyboardButton(text="▶ Искать трейлер", url=f"https://www.youtube.com/results?search_query=Трейлер+фильма+{movie_id}"))
-    builder.row(InlineKeyboardButton(text="🔙 В меню", callback_data="back_to_menu"))
+        builder.row(
+            InlineKeyboardButton(text="⏭ Еще вариант", callback_data=f"mode_{mode}")
+        )
+        builder.row(
+            InlineKeyboardButton(text="▶️ Искать трейлер", url=f"https://www.youtube.com/results?search_query=Трейлер+фильма+{movie_id}")
+        )
+    builder.row(InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_menu"))
     return builder.as_markup()
 
 # --- FORMATTERS ---
@@ -129,25 +131,29 @@ def format_movie_card(movie: dict, is_blind: bool = False) -> tuple[str, str]:
     original_title = movie.get('original_title', '')
     year = movie.get('release_date', '')[:4]
     rating = round(movie.get('vote_average', 0), 1)
-    desc = movie.get('overview', 'Описание отсутствует.')[:500] + "..."
+    
+    desc = movie.get('overview', 'Описание отсутствует.')
+    if len(desc) > 600:
+        desc = desc[:600] + "..."
+        
     poster_path = movie.get('poster_path')
     poster_url = f"{TMDbClient.IMAGE_BASE}{poster_path}" if poster_path else "https://via.placeholder.com/500x750?text=No+Poster"
 
     if is_blind:
         text = (
-            f"🙈 <b>Слепой выбор</b>\n\n"
-            f"Рейтинг: ⭐ {rating}\n"
-            f"Год: {year}\n\n"
-            f"<i>{desc}</i>\n\n"
-            f"Нажми кнопку ниже, чтобы узнать, что это за фильм!"
+            f"🤫 <b>Секретный фильм</b>\n\n"
+            f"⭐️ <b>Рейтинг:</b> {rating}/10\n"
+            f"📅 <b>Год:</b> {year}\n\n"
+            f"💬 <b>О чем:</b>\n<i>{desc}</i>\n\n"
+            f"👇 <i>Жми кнопку ниже, чтобы узнать название!</i>"
         )
-        return text, "https://via.placeholder.com/500x750/000000/FFFFFF?text=Secret+Movie"
+        return text, "https://via.placeholder.com/500x750/111111/FFFFFF?text=Secret+Movie"
 
     text = (
         f"🎬 <b>{title}</b> ({year})\n"
-        f"<i>{original_title}</i>\n\n"
-        f"⭐ Рейтинг: <b>{rating}</b>/10\n\n"
-        f"📝 <b>О сюжете:</b>\n{desc}"
+        f"└ <i>{original_title}</i>\n\n"
+        f"⭐️ <b>Рейтинг:</b> {rating}/10\n\n"
+        f"💬 <b>Сюжет:</b>\n{desc}"
     )
     return text, poster_url
 
@@ -160,8 +166,7 @@ async def cmd_start(message: Message):
     
     text = (
         "🍿 <b>Привет! Я твой умный кино-ассистент.</b>\n\n"
-        "Забудь про долгие поиски. Я помогу найти идеальный фильм на вечер за пару кликов.\n"
-        "Выбирай режим ниже 👇"
+        "Забудь про долгие поиски. Выбирай режим ниже, и я найду идеальный фильм на вечер 👇"
     )
     await message.answer(text, reply_markup=main_menu_kb())
 
@@ -172,57 +177,68 @@ async def cb_back_to_menu(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("mode_"))
 async def cb_modes(callback: CallbackQuery, state: FSMContext):
-    mode = callback.data.split("_")[1]
-    await callback.answer("Ищу магию кино... 🪄")
+    # Извлекаем режим (например, "antiscroll" или "similar_12345")
+    mode = callback.data.replace("mode_", "", 1)
     
-    # Получаем историю пользователя, чтобы не предлагать то, что он уже видел/дизлайкнул
+    await callback.answer("🔍 Ищу лучший вариант...", show_alert=False)
+    
     seen = await storage.get_user_movies(callback.from_user.id, "seen")
     disliked = await storage.get_user_movies(callback.from_user.id, "dislike")
     exclude_ids = set(seen + disliked)
 
     movies = []
     is_blind = False
+    page = random.randint(1, 5) # Рандомизация страниц для разнообразия
 
     if mode == "antiscroll":
-        # Топ рейтинг, популярное
-        movies = await tmdb.discover(sort_by="popularity.desc", vote_average_gte=7.5, vote_count_gte=1000)
+        movies = await tmdb.discover(sort_by="popularity.desc", vote_average_gte=7.5, vote_count_gte=1000, page=page)
     elif mode == "90mins":
-        # До 90 минут
-        movies = await tmdb.discover(with_runtime_lte=90, sort_by="popularity.desc", vote_average_gte=6.5)
+        movies = await tmdb.discover(with_runtime_lte=90, sort_by="popularity.desc", vote_average_gte=6.5, page=page)
     elif mode == "blind":
-        movies = await tmdb.discover(sort_by="popularity.desc", vote_average_gte=8.0)
+        movies = await tmdb.discover(sort_by="popularity.desc", vote_average_gte=8.0, page=page)
         is_blind = True
     elif mode == "party":
-        # Комедии (35) или Экшен (28)
-        movies = await tmdb.discover(with_genres="35,28", sort_by="popularity.desc")
+        movies = await tmdb.discover(with_genres="35,28", sort_by="popularity.desc", page=page)
+    elif mode == "idk":
+        movies = await tmdb.discover(sort_by="popularity.desc", vote_average_gte=7.0, page=random.randint(1, 15))
+    elif mode == "filter":
+        movies = await tmdb.discover(sort_by="popularity.desc", vote_average_gte=6.5, vote_count_gte=500, page=page)
     elif mode == "similar":
-        await callback.message.answer("Напиши название твоего любимого фильма, и я найду похожие:")
+        await callback.message.answer("🍿 <b>Напиши название фильма</b>, и я найду похожие на него:")
         await state.set_state(SearchState.waiting_for_movie_name)
         return
-    elif mode == "idk":
-        # Сюрприз из случайной страницы хороших фильмов
-        page = random.randint(1, 10)
-        movies = await tmdb.discover(sort_by="popularity.desc", vote_average_gte=7.0, page=page)
+    elif mode.startswith("similar_"):
+        # Обработка кнопки "Еще вариант" для режима похожих фильмов
+        movie_id = int(mode.split("_")[1])
+        movies = await tmdb.get_similar(movie_id)
     else:
-        await callback.message.answer("Этот режим в разработке 🚀", reply_markup=main_menu_kb())
+        await callback.message.answer("Этот режим скоро появится! 🚀", reply_markup=main_menu_kb())
         return
 
-    # Фильтрация
-    valid_movies = [m for m in movies if m.get("id") not in exclude_ids]
+    # Фильтруем то, что уже видели, и фильмы без описания
+    valid_movies = [m for m in movies if m.get("id") not in exclude_ids and m.get("overview")]
     
     if not valid_movies:
-        await callback.message.answer("Кажется, ты пересмотрел всё в этой категории! Попробуй другой режим.", reply_markup=main_menu_kb())
-        return
+        # Если на этой странице всё посмотрели, берем просто популярное с другой страницы
+        movies = await tmdb.discover(sort_by="popularity.desc", page=random.randint(6, 20))
+        valid_movies = [m for m in movies if m.get("id") not in exclude_ids and m.get("overview")]
+        
+        if not valid_movies:
+            await callback.message.answer("Ты настоящий киноман! Кажется, ты пересмотрел всё. Попробуй другой режим.", reply_markup=main_menu_kb())
+            return
 
     movie = random.choice(valid_movies)
     text, poster = format_movie_card(movie, is_blind=is_blind)
     
-    # Удаляем старое сообщение и шлем новое с фото
-    await callback.message.delete()
+    try:
+        await callback.message.delete()
+    except:
+        pass
+        
     await callback.message.answer_photo(
         photo=poster,
         caption=text,
-        reply_markup=movie_card_kb(movie['id'], is_blind=is_blind)
+        reply_markup=movie_card_kb(movie['id'], mode, is_blind=is_blind)
     )
 
 @router.message(SearchState.waiting_for_movie_name)
@@ -243,28 +259,41 @@ async def process_similar_search(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    movie = random.choice(similar_movies[:10]) # Берем из топ-10 похожих
+    movie = random.choice(similar_movies[:10])
     text, poster = format_movie_card(movie)
     
-    await message.answer_photo(photo=poster, caption=text, reply_markup=movie_card_kb(movie['id']))
+    # Сохраняем ID первого фильма в mode, чтобы кнопка "Еще вариант" искала похожие именно на него
+    mode = f"similar_{first_movie_id}"
+    
+    await message.answer_photo(photo=poster, caption=text, reply_markup=movie_card_kb(movie['id'], mode))
     await state.clear()
 
 @router.callback_query(F.data.startswith("reveal_"))
 async def cb_reveal(callback: CallbackQuery):
-    movie_id = int(callback.data.split("_")[1])
+    parts = callback.data.split("_")
+    movie_id = int(parts[1])
+    mode = parts[2] if len(parts) > 2 else "blind"
+    
     movie = await tmdb.get_movie(movie_id)
     text, poster = format_movie_card(movie, is_blind=False)
     
-    await callback.message.delete()
+    try:
+        await callback.message.delete()
+    except:
+        pass
+        
     await callback.message.answer_photo(
         photo=poster,
         caption=text,
-        reply_markup=movie_card_kb(movie_id, is_blind=False)
+        reply_markup=movie_card_kb(movie_id, mode, is_blind=False)
     )
+    await callback.answer()
 
 @router.callback_query(F.data.startswith("action_"))
 async def cb_movie_action(callback: CallbackQuery):
-    _, action, movie_id = callback.data.split("_")
+    parts = callback.data.split("_")
+    action = parts[1]
+    movie_id = parts[2]
     user_id = callback.from_user.id
     
     await storage.add_movie_action(user_id, int(movie_id), action)
@@ -272,16 +301,11 @@ async def cb_movie_action(callback: CallbackQuery):
     action_texts = {
         "like": "✅ Запомнил! Буду предлагать больше такого.",
         "dislike": "🗑 Понял, больше такое не предложу.",
-        "watchlist": "⭐ Добавлено в избранное!",
+        "watchlist": "⭐️ Добавлено в избранное!",
         "seen": "👀 Отметил как просмотренное."
     }
     
-    await callback.answer(action_texts.get(action, "Сохранено!"))
-
-@router.callback_query(F.data == "next_random")
-async def cb_next_random(callback: CallbackQuery):
-    # Простой переход к анти-скроллу для кнопки "Еще вариант"
-    await cb_modes(callback, FSMContext(storage=dp.storage, key=callback.message.chat.id))
+    await callback.answer(action_texts.get(action, "Сохранено!"), show_alert=False)
 
 @router.callback_query(F.data == "invite_friend")
 async def cb_invite(callback: CallbackQuery):
