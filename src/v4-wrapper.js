@@ -27,7 +27,13 @@ function rewriteRequest(request) {
   }
 
   if (!changed) return request;
-  return new Request(url.toString(), request, { method });
+
+  const init = {
+    method,
+    headers: request.headers
+  };
+  if (method !== 'GET' && method !== 'HEAD') init.body = request.body;
+  return new Request(url.toString(), init);
 }
 
 export default {
