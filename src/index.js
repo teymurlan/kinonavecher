@@ -1,170 +1,32 @@
-const ADMIN_ID = 835372319;
-
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': 'no-store'
-    }
-  });
-}
-
-function htmlPage() {
-  return `<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <title>График заказчиков</title>
-  <style>
-    :root{color-scheme:light dark}
-    *{box-sizing:border-box}
-    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f3f5f7;color:#111}
-    .wrap{max-width:720px;margin:0 auto;padding:18px}
-    .hero{background:#111827;color:#fff;border-radius:24px;padding:22px;margin-bottom:14px}
-    .hero h1{font-size:26px;margin:0 0 8px}.hero p{margin:0;opacity:.8}
-    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-    .card{background:#fff;border-radius:20px;padding:18px;box-shadow:0 8px 28px rgba(0,0,0,.06)}
-    .n{font-size:28px;font-weight:800;margin-top:8px}.muted{color:#6b7280;font-size:14px}
-    .full{grid-column:1/-1}.ok{color:#15803d;font-weight:700}.warn{color:#b45309;font-weight:700}
-    button{width:100%;border:0;border-radius:16px;padding:14px;font-size:16px;font-weight:700;background:#111827;color:#fff;margin-top:14px}
-    @media (prefers-color-scheme:dark){body{background:#0b0f14;color:#fff}.card{background:#151b23}.muted{color:#9ca3af}}
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <div class="hero">
-      <h1>График заказчиков</h1>
-      <p>House Cleaning · закрытая CRM</p>
-    </div>
-    <div class="grid">
-      <div class="card"><div class="muted">Сегодня</div><div class="n">0</div></div>
-      <div class="card"><div class="muted">Завтра</div><div class="n">0</div></div>
-      <div class="card"><div class="muted">7 дней</div><div class="n">0</div></div>
-      <div class="card"><div class="muted">Не оплачено</div><div class="n">0 ₽</div></div>
-      <div class="card full">
-        <div class="ok">WebApp запущен</div>
-        <p class="muted">Telegram и Cloudflare работают. Google Таблица пока не подключена, поэтому реальные заказы ещё не загружаются.</p>
-        <button onclick="Telegram.WebApp?.close()">Закрыть</button>
-      </div>
-    </div>
-  </div>
-  <script>
-    const tg = window.Telegram?.WebApp;
-    if (tg) { tg.ready(); tg.expand(); }
-  </script>
-</body>
-</html>`;
-}
-
-async function telegram(env, method, payload) {
-  if (!env.BOT_TOKEN) throw new Error('BOT_TOKEN not configured');
-  const r = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`, {
-    method: 'POST',
-    headers: {'content-type':'application/json'},
-    body: JSON.stringify(payload)
-  });
-  const d = await r.json();
-  if (!d.ok) throw new Error(`${method}: ${d.description || 'Telegram error'}`);
-  return d;
-}
-
-async function ensureWebhook(env, origin) {
-  if (!env.BOT_TOKEN) return {ok:false, reason:'BOT_TOKEN missing'};
-  const desired = `${origin}/telegram/webhook`;
-  try {
-    const info = await telegram(env, 'getWebhookInfo', {});
-    if (info?.result?.url === desired) return {ok:true, url:desired, changed:false};
-    await telegram(env, 'setWebhook', {
-      url: desired,
-      secret_token: env.TELEGRAM_WEBHOOK_SECRET || undefined,
-      allowed_updates: ['message'],
-      drop_pending_updates: false
-    });
-    return {ok:true, url:desired, changed:true};
-  } catch (e) {
-    return {ok:false, reason:e.message};
-  }
-}
-
-async function handleWebhook(request, env) {
-  if (env.TELEGRAM_WEBHOOK_SECRET) {
-    const secret = request.headers.get('X-Telegram-Bot-Api-Secret-Token');
-    if (secret !== env.TELEGRAM_WEBHOOK_SECRET) return new Response('Forbidden', {status:403});
-  }
-
-  const update = await request.json();
-  const m = update.message;
-  if (!m) return json({ok:true});
-
-  const userId = Number(m.from?.id || 0);
-  const chatId = Number(m.chat?.id || 0);
-  const text = String(m.text || '');
-  if (!chatId) return json({ok:true});
-
-  if (text.startsWith('/start')) {
-    if (userId !== ADMIN_ID) {
-      await telegram(env, 'sendMessage', {
-        chat_id: chatId,
-        text: 'Доступ закрыт. Этот бот предназначен только для руководителя и бухгалтера.'
-      });
-      return json({ok:true});
-    }
-
-    const appUrl = new URL(request.url).origin;
-    await telegram(env, 'sendMessage', {
-      chat_id: chatId,
-      text: 'График заказчиков\n\nДоступ администратора подтверждён.',
-      reply_markup: {
-        inline_keyboard: [[{
-          text: 'Открыть график',
-          web_app: {url: appUrl}
-        }]]
-      }
-    });
-  }
-
-  return json({ok:true});
-}
-
-export default {
-  async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-
-    try {
-      if (url.pathname === '/health') {
-        const webhook = await ensureWebhook(env, url.origin);
-        return json({
-          ok: true,
-          telegram_configured: Boolean(env.BOT_TOKEN),
-          webhook_secret_configured: Boolean(env.TELEGRAM_WEBHOOK_SECRET),
-          google_configured: Boolean(env.GOOGLE_SERVICE_ACCOUNT_JSON),
-          admin_id: ADMIN_ID,
-          webhook
-        });
-      }
-
-      if (url.pathname === '/setup-webhook') {
-        return json(await ensureWebhook(env, url.origin));
-      }
-
-      if (url.pathname === '/telegram/webhook' && request.method === 'POST') {
-        return handleWebhook(request, env);
-      }
-
-      if (url.pathname === '/' && request.method === 'GET') {
-        ctx.waitUntil(ensureWebhook(env, url.origin));
-        return new Response(htmlPage(), {
-          headers: {'content-type':'text/html; charset=utf-8'}
-        });
-      }
-
-      return new Response('Not found', {status:404});
-    } catch (e) {
-      console.error(e);
-      return json({ok:false, error:e.message || 'Internal error'}, 500);
-    }
-  }
-};
+const MONTHS={январь:1,февраль:2,март:3,апрель:4,май:5,июнь:6,июль:7,август:8,сентябрь:9,октябрь:10,ноябрь:11,декабрь:12};
+const SHEET_RE=/^(Январь|Февраль|Март|Апрель|Май|Июнь|Июль|Август|Сентябрь|Октябрь|Ноябрь|Декабрь)\s+(\d{4})$/i;
+const LABEL_RE=/^\s*(Время|Адрес|Тел\.\s*Заказчика|Тел\s*Заказчика|Телефон\s*Заказчика|Вид\s*услуги|Общая\s*сумма|Оплата|Статус|Исполнитель|Примечание)\s*:\s*(.*)$/i;
+const PHONE_RE=/(?:\+?7|8)[\s\-()]*\d(?:[\s\-()]*\d){9}/g;
+const enc=new TextEncoder(); let tokenCache={token:'',exp:0};
+function J(x,s=200){return new Response(JSON.stringify(x),{status:s,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}})}
+function ids(raw){return new Set(String(raw||'').split(',').map(x=>Number(x.trim())).filter(Number.isFinite))}
+function hex(b){return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}
+async function hmac(k,m){const key=await crypto.subtle.importKey('raw',k,{name:'HMAC',hash:'SHA-256'},false,['sign']);return crypto.subtle.sign('HMAC',key,enc.encode(m))}
+async function auth(req,env){const d=req.headers.get('X-Telegram-Init-Data')||'';if(!d)throw Object.assign(new Error('Откройте приложение из Telegram'),{status:401});const p=new URLSearchParams(d),h=p.get('hash');if(!h)throw Object.assign(new Error('Нет подписи Telegram'),{status:401});p.delete('hash');const check=[...p.keys()].sort().map(k=>`${k}=${p.get(k)}`).join('\n');const secret=await hmac(enc.encode('WebAppData'),env.BOT_TOKEN);const calc=hex(await hmac(new Uint8Array(secret),check));if(calc!==h.toLowerCase())throw Object.assign(new Error('Неверная подпись Telegram'),{status:401});let u={};try{u=JSON.parse(p.get('user')||'{}')}catch{}const id=Number(u.id||0);if(!ids(env.ALLOWED_TELEGRAM_IDS).has(id))throw Object.assign(new Error('Доступ запрещён'),{status:403});return{id,name:[u.first_name,u.last_name].filter(Boolean).join(' ')||u.username||String(id)}}
+function pem(p){const b=p.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\s+/g,'');const x=atob(b);return Uint8Array.from(x,c=>c.charCodeAt(0)).buffer}
+function b64u(bytes){let s='';for(const b of (bytes instanceof Uint8Array?bytes:new Uint8Array(bytes)))s+=String.fromCharCode(b);return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')}
+async function gtoken(env){if(tokenCache.token&&tokenCache.exp>Date.now()+60000)return tokenCache.token;let sa;try{sa=JSON.parse(env.GOOGLE_SERVICE_ACCOUNT_JSON)}catch{throw new Error('Ошибка JSON сервисного аккаунта')};const now=Math.floor(Date.now()/1000),head=b64u(enc.encode(JSON.stringify({alg:'RS256',typ:'JWT'}))),pay=b64u(enc.encode(JSON.stringify({iss:sa.client_email,scope:'https://www.googleapis.com/auth/spreadsheets',aud:sa.token_uri||'https://oauth2.googleapis.com/token',iat:now,exp:now+3600}))),unsigned=`${head}.${pay}`;const key=await crypto.subtle.importKey('pkcs8',pem(sa.private_key),{name:'RSASSA-PKCS1-v1_5',hash:'SHA-256'},false,['sign']);const sig=await crypto.subtle.sign('RSASSA-PKCS1-v1_5',key,enc.encode(unsigned));const r=await fetch(sa.token_uri||'https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'urn:ietf:params:oauth:grant-type:jwt-bearer',assertion:`${unsigned}.${b64u(sig)}`})});const x=await r.json();if(!r.ok||!x.access_token)throw new Error(`Google OAuth: ${x.error_description||x.error||r.status}`);tokenCache={token:x.access_token,exp:Date.now()+Number(x.expires_in||3600)*1000};return x.access_token}
+async function gf(env,path,opt={}){const t=await gtoken(env);const r=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${env.GOOGLE_SHEET_ID}${path}`,{...opt,headers:{authorization:`Bearer ${t}`,'content-type':'application/json',...(opt.headers||{})}});const x=await r.json().catch(()=>({}));if(!r.ok)throw new Error(`Google Sheets: ${x?.error?.message||r.status}`);return x}
+function parts(n){const m=String(n).trim().match(SHEET_RE);return m?[MONTHS[m[1].toLowerCase()],Number(m[2])]:null}
+function excelDay(n){return new Date(Date.UTC(1899,11,30)+Number(n)*86400000).getUTCDate()}
+function headerDate(v,m,y){let d=null;if(typeof v==='number'&&v>10000)d=excelDay(v);else if(typeof v==='string'){const s=v.trim();let q;if((q=s.match(/^(\d{1,2})[./](\d{1,2})[./](\d{2,4})$/)))d=+q[1];else if((q=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)))d=+q[3];else if(/^\d{1,2}$/.test(s))d=+s}if(!d)return null;const z=new Date(Date.UTC(y,m-1,d));if(z.getUTCMonth()!==m-1)return null;return`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`}
+function dateCols(name,vals){const [m,y]=parts(name)||[];const out=new Map();if(!m)return out;const h=vals[1]||[];let cur=null;for(let c=1;c<=Math.max(h.length,...vals.map(r=>r.length));c++){const d=headerDate(h[c-1],m,y);if(d)cur=d;if(cur)out.set(c,cur)}return out}
+function label(s){s=s.replace(/\s+/g,' ').trim().toLowerCase();if(s==='время')return'time';if(s==='адрес')return'address';if(s.includes('заказчика'))return'contact';if(s==='вид услуги')return'service';if(s==='общая сумма')return'amount';if(s==='оплата')return'payment';if(s==='статус')return'status';if(s==='исполнитель')return'cleaner';if(s==='примечание')return'comment'}
+function contact(v){const raw=String(v||'').replace(/\s+/g,' ').trim(),ms=[...raw.matchAll(PHONE_RE)],phones=ms.map(m=>m[0].trim());let client=raw;for(let i=ms.length-1;i>=0;i--){const m=ms[i];client=client.slice(0,m.index)+' '+client.slice(m.index+m[0].length)}client=client.replace(/\s+/g,' ').replace(/^[\s,;\-/]+|[\s,;\-/]+$/g,'');return[client,phones.join(', ')]}
+function parseCell(text,date,sheet,row,col){const raw=String(text||'').trim(),low=raw.toLowerCase();if(!raw||!['адрес:','заказчика:','вид услуги:','общая сумма:'].some(x=>low.includes(x)))return null;const f={};let cur=null;for(const line of raw.split(/\r?\n/)){const m=line.match(LABEL_RE);if(m){cur=label(m[1]);if(cur)f[cur]=m[2].trim()}else if(cur&&line.trim())f[cur]=`${f[cur]||''}\n${line.trim()}`.trim()}if(!f.address&&!f.contact&&!f.service&&!f.amount)return null;const [client,phone]=contact(f.contact);return{id:`${sheet}:${row}:${col}`,date,time:f.time||'',client,phone,address:f.address||'',service:f.service||'',amount:f.amount||'',payment:f.payment||'',status:f.status||'',cleaner:f.cleaner||'',comment:f.comment||'',source_sheet:sheet}}
+async function sheetNames(env){const x=await gf(env,'?fields=sheets.properties(title,index)');return(x.sheets||[]).sort((a,b)=>(a.properties.index||0)-(b.properties.index||0)).map(x=>x.properties.title)}
+async function orders(env){const names=(await sheetNames(env)).filter(parts);if(!names.length)return[];const q=new URLSearchParams({valueRenderOption:'UNFORMATTED_VALUE',dateTimeRenderOption:'SERIAL_NUMBER'});for(const n of names)q.append('ranges',`'${n}'!1:31`);const x=await gf(env,`/values:batchGet?${q}`),out=[];for(let i=0;i<names.length;i++){const name=names[i],v=x.valueRanges?.[i]?.values||[],dc=dateCols(name,v);for(let r=3;r<=v.length;r++){const row=v[r-1]||[];for(let c=2;c<=row.length;c++){const d=dc.get(c),cell=row[c-1];if(d&&typeof cell==='string'){const o=parseCell(cell,d,name,r,c);if(o)out.push(o)}}}}return out}
+function num(v){const s=String(v??'').toLowerCase().replace(/₽|руб\.?/g,'').trim();if(!/^[0-9\s.,-]+$/.test(s))return 0;const n=Number(s.replace(/\s/g,'').replace(',','.'));return Number.isFinite(n)?n:0}
+function today(env){return new Intl.DateTimeFormat('en-CA',{timeZone:env.APP_TIMEZONE||'Europe/Moscow',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())}
+function add(iso,n){const d=new Date(`${iso}T12:00:00Z`);d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
+function boot(env,user,all){const t=today(env),tm=add(t,1),we=add(t,6);all.sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time));const unpaid=all.filter(o=>['не оплачено','не оплачен','долг','частично'].includes(String(o.payment).toLowerCase()));return{today:t,me:user,dashboard:{today:{count:all.filter(o=>o.date===t).length},tomorrow:{count:all.filter(o=>o.date===tm).length},week:{count:all.filter(o=>o.date>=t&&o.date<=we).length},unpaid:{count:unpaid.length,amount:unpaid.reduce((s,o)=>s+num(o.amount),0)}},orders:{count:all.length,items:all}}}
+async function tg(env,method,payload){const r=await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});return r.json()}
+async function webhook(env,origin){if(!env.BOT_TOKEN)return;const desired=`${origin}/telegram/webhook`,i=await tg(env,'getWebhookInfo',{});if(i?.result?.url!==desired)await tg(env,'setWebhook',{url:desired,...(env.TELEGRAM_WEBHOOK_SECRET?{secret_token:env.TELEGRAM_WEBHOOK_SECRET}:{}),allowed_updates:['message']})}
+async function tgHook(req,env){if(env.TELEGRAM_WEBHOOK_SECRET&&req.headers.get('X-Telegram-Bot-Api-Secret-Token')!==env.TELEGRAM_WEBHOOK_SECRET)return J({ok:false},403);const u=await req.json(),m=u.message;if(!m)return J({ok:true});const id=Number(m.from?.id),chat=m.chat?.id;if(String(m.text||'').startsWith('/start')){if(!ids(env.ALLOWED_TELEGRAM_IDS).has(id))await tg(env,'sendMessage',{chat_id:chat,text:'Доступ закрыт.'});else await tg(env,'sendMessage',{chat_id:chat,text:'График заказчиков\n\nЗаказы и клиенты в одном месте.',reply_markup:{inline_keyboard:[[{text:'Открыть график',web_app:{url:new URL(req.url).origin}}]]}})}return J({ok:true})}
+function page(){return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><script src="https://telegram.org/js/telegram-web-app.js"></script><title>График заказчиков</title><style>*{box-sizing:border-box}body{margin:0;background:#f3f5f7;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#111}.w{max-width:760px;margin:auto;padding:16px}.hero{background:#111827;color:white;border-radius:24px;padding:22px}.hero h1{margin:0 0 6px;font-size:28px}.muted{color:#6b7280}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}.card{background:white;border-radius:20px;padding:18px}.n{font-size:30px;font-weight:800;margin-top:6px}.full{grid-column:1/-1}.tabs{display:flex;gap:8px;margin:14px 0;overflow:auto}.tab{border:0;border-radius:14px;padding:11px 14px;background:#e5e7eb;font-weight:700}.tab.on{background:#111827;color:#fff}.order{padding:14px 0;border-bottom:1px solid #eee}.date{font-weight:800}.pill{display:inline-block;background:#eef2ff;border-radius:999px;padding:4px 8px;font-size:12px}.hidden{display:none}.err{background:#fee2e2;color:#991b1b;border-radius:16px;padding:14px;margin-top:12px}.load{padding:24px;text-align:center}.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}.day{min-height:62px;background:#fff;border-radius:12px;padding:7px;font-size:12px}.day b{display:block;font-size:14px}.cnt{margin-top:6px;font-weight:800;color:#2563eb}@media(prefers-color-scheme:dark){body{background:#0b0f14;color:#fff}.card,.day{background:#151b23}.muted{color:#9ca3af}.order{border-color:#26303d}.tab{background:#26303d;color:#fff}}</style></head><body><div class="w"><div class="hero"><h1>График заказчиков</h1><div>House Cleaning · закрытая CRM</div></div><div id="status" class="load">Загрузка заказов…</div><div id="app" class="hidden"><div class="grid"><div class="card"><div class="muted">Сегодня</div><div id="d0" class="n">0</div></div><div class="card"><div class="muted">Завтра</div><div id="d1" class="n">0</div></div><div class="card"><div class="muted">7 дней</div><div id="d7" class="n">0</div></div><div class="card"><div class="muted">Всего заказов</div><div id="all" class="n">0</div></div></div><div class="tabs"><button class="tab on" data-v="orders">Заказы</button><button class="tab" data-v="calendar">График</button></div><div id="orders" class="card full"></div><div id="calendar" class="hidden"></div></div></div><script>const tg=Telegram.WebApp;tg.ready();tg.expand();let DATA=null;async function load(){try{const r=await fetch('/api/bootstrap',{headers:{'X-Telegram-Init-Data':tg.initData}}),x=await r.json();if(!r.ok)throw Error(x.detail||'Ошибка');DATA=x;document.querySelector('#status').className='hidden';document.querySelector('#app').className='';d0.textContent=x.dashboard.today.count;d1.textContent=x.dashboard.tomorrow.count;d7.textContent=x.dashboard.week.count;all.textContent=x.orders.count;renderOrders();renderCal()}catch(e){status.className='err';status.textContent=e.message}}function renderOrders(){const a=[...DATA.orders.items].sort((a,b)=>b.date.localeCompare(a.date)||String(b.time).localeCompare(String(a.time)));orders.innerHTML=a.slice(0,150).map(o=>'<div class="order"><div class="date">'+o.date+(o.time?' · '+o.time:'')+'</div><div><b>'+(o.client||'Без имени')+'</b>'+(o.phone?' · '+o.phone:'')+'</div><div class="muted">'+(o.address||'')+'</div><div>'+(o.service?'<span class="pill">'+o.service+'</span> ':'')+(o.amount||'')+'</div></div>').join('')||'<div class="muted">Заказов нет</div>'}function renderCal(){const now=new Date(DATA.today+'T12:00:00'),y=now.getFullYear(),m=now.getMonth(),first=new Date(y,m,1),last=new Date(y,m+1,0),by={};for(const o of DATA.orders.items){if(o.date.startsWith(y+'-'+String(m+1).padStart(2,'0')))by[o.date]=(by[o.date]||0)+1}let h='<div class="card"><b>'+first.toLocaleString('ru-RU',{month:'long',year:'numeric'})+'</b><div class="cal">';for(let i=1;i<(first.getDay()||7);i++)h+='<div></div>';for(let d=1;d<=last.getDate();d++){const k=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');h+='<div class="day"><b>'+d+'</b>'+(by[k]?'<div class="cnt">'+by[k]+' зак.</div>':'')+'</div>'}calendar.innerHTML=h+'</div></div>'}document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));b.classList.add('on');orders.classList.toggle('hidden',b.dataset.v!=='orders');calendar.classList.toggle('hidden',b.dataset.v!=='calendar')});load();</script></body></html>`}
+export default{async fetch(req,env,ctx){const u=new URL(req.url);try{if(u.pathname==='/health'){ctx.waitUntil(webhook(env,u.origin));let google_access=false,google_error='';if(env.GOOGLE_SHEET_ID&&env.GOOGLE_SERVICE_ACCOUNT_JSON)try{await sheetNames(env);google_access=true}catch(e){google_error=e.message}return J({ok:true,telegram_configured:!!env.BOT_TOKEN,google_configured:!!(env.GOOGLE_SHEET_ID&&env.GOOGLE_SERVICE_ACCOUNT_JSON),google_access,google_error,allowed_users_count:ids(env.ALLOWED_TELEGRAM_IDS).size})}if(u.pathname==='/telegram/webhook'&&req.method==='POST')return tgHook(req,env);if(u.pathname==='/api/bootstrap'){const user=await auth(req,env);return J(boot(env,user,await orders(env)))}if(u.pathname==='/'&&req.method==='GET'){ctx.waitUntil(webhook(env,u.origin));return new Response(page(),{headers:{'content-type':'text/html; charset=utf-8'}})}return new Response('Not found',{status:404})}catch(e){console.error(e);return J({detail:e.message||'Ошибка'},e.status||500)}}};
