@@ -1,4 +1,0 @@
-aiogram
-aiohttp
-aiosqlite
-python-dotenv
