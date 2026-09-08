@@ -1,6 +1,7 @@
 import {STYLE_1} from './v5-s1.js';
 import {STYLE_2} from './v5-s2.js';
 import {STYLE_3} from './v5-s3.js';
+import {STYLE_4} from './v5-s4.js';
 import {CLIENT_1} from './v5-c1.js';
 import {CLIENT_2} from './v5-c2.js';
 import {CLIENT_3} from './v5-c3.js';
@@ -9,9 +10,10 @@ import {CLIENT_5} from './v5-c5.js';
 import {CLIENT_6} from './v5-c6.js';
 import {CLIENT_7} from './v5-c7.js';
 import {CLIENT_8} from './v5-c8.js';
+import {CLIENT_9} from './v5-c9.js';
 
-const STYLE = STYLE_1 + STYLE_2 + STYLE_3;
-const CLIENT = CLIENT_1 + CLIENT_2 + CLIENT_3 + CLIENT_4 + CLIENT_5 + CLIENT_6 + CLIENT_7 + CLIENT_8;
+const STYLE = STYLE_1 + STYLE_2 + STYLE_3 + STYLE_4;
+const CLIENT = CLIENT_1 + CLIENT_2 + CLIENT_3 + CLIENT_4 + CLIENT_5 + CLIENT_6 + CLIENT_7 + CLIENT_8 + CLIENT_9;
 
 export const PAGE = `<!doctype html>
 <html lang="ru">
